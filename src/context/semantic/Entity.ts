@@ -1,8 +1,8 @@
-import { stringToBoolean } from '../../utils/String';
+import { stringToBoolean, toStringOrUndefined } from '../../utils/String';
 import { toNumber } from '../../utils/TypeConverters';
 import { EntityType } from '../CloudFormationEnums';
 import { CfnIntrinsicFunction, CfnValue, MappingValueType } from './CloudFormationTypes';
-import { coerceParameterToTypedValues, ParameterType, ParameterValueType } from './ParameterType';
+import { coerceParameterToTypedValues, ParameterType, ParameterValueType, PARAMETER_TYPES } from './ParameterType';
 
 export abstract class Entity {
     private _keys!: ReadonlyArray<string>;
@@ -114,12 +114,14 @@ export class Parameter extends Entity {
 
         return new Parameter(
             logicalId,
-            object['Type'] as ParameterType | undefined,
+            typeof object['Type'] === 'string' && PARAMETER_TYPES.includes(object['Type'] as ParameterType)
+                ? (object['Type'] as ParameterType)
+                : undefined,
             Default,
-            object['AllowedPattern'] as string | undefined,
+            toStringOrUndefined(object['AllowedPattern']),
             AllowedValues,
-            object['ConstraintDescription'] as string | undefined,
-            object['Description'] as string | undefined,
+            toStringOrUndefined(object['ConstraintDescription']),
+            toStringOrUndefined(object['Description']),
             object['MaxLength'] === undefined ? undefined : toNumber(object['MaxLength']),
             object['MaxValue'] === undefined ? undefined : toNumber(object['MaxValue']),
             object['MinLength'] === undefined ? undefined : toNumber(object['MinLength']),
