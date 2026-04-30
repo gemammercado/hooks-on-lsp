@@ -47,7 +47,7 @@ describe('ResourceStateManager', () => {
 
             const result = await manager.getResource('AWS::S3::Bucket', 'my-bucket');
 
-            expect(result?.properties).toEqual('{"BucketName": "my-bucket"}');
+            expect(result?.resource?.properties).toEqual('{"BucketName": "my-bucket"}');
             await manager.getResource('AWS::S3::Bucket', 'my-bucket');
             expect(mockCcapiService.getResource).toHaveBeenCalledOnce();
         });
@@ -66,14 +66,16 @@ describe('ResourceStateManager', () => {
             const result = await manager.getResource('AWS::S3::Bucket', 'my-bucket');
 
             expect(result).toEqual({
-                typeName: 'AWS::S3::Bucket',
-                identifier: 'my-bucket',
-                properties: '{"BucketName": "my-bucket"}',
-                createdTimestamp: expect.any(DateTime),
+                resource: {
+                    typeName: 'AWS::S3::Bucket',
+                    identifier: 'my-bucket',
+                    properties: '{"BucketName": "my-bucket"}',
+                    createdTimestamp: expect.any(DateTime),
+                },
             });
         });
 
-        it('should handle ResourceNotFoundException', async () => {
+        it('should return error for ResourceNotFoundException', async () => {
             const error = new ResourceNotFoundException({
                 message: 'Resource not found',
                 $metadata: { httpStatusCode: 404 },
@@ -81,27 +83,30 @@ describe('ResourceStateManager', () => {
             vi.mocked(mockCcapiService.getResource).mockRejectedValue(error);
 
             const result = await manager.getResource('AWS::S3::Bucket', 'nonexistent');
-
-            expect(result).toBeUndefined();
+            expect(result.resource).toBeUndefined();
+            expect(result.error).toContain('Resource not found');
         });
 
-        it('should throw on server errors', async () => {
+        it('should rethrow other errors', async () => {
             const error = new Error('Service error');
             vi.mocked(mockCcapiService.getResource).mockRejectedValue(error);
 
             await expect(manager.getResource('AWS::S3::Bucket', 'my-bucket')).rejects.toThrow('Service error');
         });
 
-        it('should return undefined for client errors', async () => {
-            const error = { name: 'AccessDeniedException', $metadata: { httpStatusCode: 403 }, message: 'Denied' };
+        it('should return error for AccessDeniedException', async () => {
+            const error = new Error(
+                'User: arn:aws:sts::123456789012:assumed-role/Limited/user is not authorized to perform: cloudformation:GetResource on resource: arn:aws:cloudformation:us-east-1:123456789012:resource/*',
+            );
+            error.name = 'AccessDeniedException';
             vi.mocked(mockCcapiService.getResource).mockRejectedValue(error);
 
             const result = await manager.getResource('AWS::S3::Bucket', 'my-bucket');
-
-            expect(result).toBeUndefined();
+            expect(result.resource).toBeUndefined();
+            expect(result.error).toContain('not authorized to perform');
         });
 
-        it('should handle missing required fields in output', async () => {
+        it('should return error for missing required fields', async () => {
             const mockOutput: GetResourceCommandOutput = {
                 TypeName: 'AWS::S3::Bucket',
                 ResourceDescription: {
@@ -113,8 +118,8 @@ describe('ResourceStateManager', () => {
             vi.mocked(mockCcapiService.getResource).mockResolvedValue(mockOutput);
 
             const result = await manager.getResource('AWS::S3::Bucket', 'my-bucket');
-
-            expect(result).toBeUndefined();
+            expect(result.resource).toBeUndefined();
+            expect(result.error).toBe('GetResource output is missing required fields');
         });
     });
 

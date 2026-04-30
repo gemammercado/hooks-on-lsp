@@ -92,7 +92,7 @@ describe('ResourceStateImporter', () => {
                         },
                     ];
 
-                    mockResourceStateManager.getResource.mockResolvedValue(mockResource);
+                    mockResourceStateManager.getResource.mockResolvedValue({ resource: mockResource });
 
                     const params: ResourceStateParams = {
                         resourceSelections,
@@ -136,7 +136,7 @@ describe('ResourceStateImporter', () => {
                         },
                     ];
 
-                    mockResourceStateManager.getResource.mockResolvedValue(mockResource);
+                    mockResourceStateManager.getResource.mockResolvedValue({ resource: mockResource });
 
                     const params: ResourceStateParams = {
                         resourceSelections,
@@ -203,6 +203,9 @@ describe('ResourceStateImporter', () => {
 
             createAndRegisterDocument(uri, scenario.initialContent, scenario.documentType);
 
+            // Mock getResource to throw an error
+            mockResourceStateManager.getResource.mockRejectedValue(new Error('Resource not found'));
+
             const params: ResourceStateParams = {
                 resourceSelections: [{ resourceType: 'AWS::S3::Bucket', resourceIdentifiers: ['test-bucket'] }],
                 textDocument: { uri },
@@ -214,6 +217,79 @@ describe('ResourceStateImporter', () => {
             expect(result.completionItem).toBeUndefined();
             expect(Object.keys(result.successfulImports)).toHaveLength(0);
             expect(Object.keys(result.failedImports)).toHaveLength(1);
+        });
+
+        it('should populate failureReasons when resource import fails', async () => {
+            const uri = 'test://test-failure-reasons.template';
+            const scenario = TestScenarios[0];
+
+            createAndRegisterDocument(uri, scenario.initialContent, scenario.documentType);
+
+            mockResourceStateManager.getResource.mockResolvedValue({ error: 'Access denied' });
+
+            const params: ResourceStateParams = {
+                resourceSelections: [{ resourceType: 'AWS::S3::Bucket', resourceIdentifiers: ['my-bucket'] }],
+                textDocument: { uri },
+                purpose: ResourceStatePurpose.IMPORT,
+            };
+
+            const result = await importer.importResourceState(params);
+
+            expect(result.failureReasons).toBeDefined();
+            expect(result.failureReasons!['AWS::S3::Bucket']['my-bucket']).toBe('Access denied');
+        });
+
+        it('should not include failureReasons when all imports succeed', async () => {
+            const uri = 'test://test-no-failure-reasons.template';
+            const scenario = TestScenarios[0];
+
+            createAndRegisterDocument(uri, scenario.initialContent, scenario.documentType);
+
+            const mockResource = createMockResourceState('AWS::S3::Bucket');
+            mockResourceStateManager.getResource.mockResolvedValue({ resource: mockResource });
+
+            const params: ResourceStateParams = {
+                resourceSelections: [
+                    { resourceType: 'AWS::S3::Bucket', resourceIdentifiers: [mockResource.identifier] },
+                ],
+                textDocument: { uri },
+                purpose: ResourceStatePurpose.IMPORT,
+            };
+
+            const result = await importer.importResourceState(params);
+
+            expect(result.failureReasons).toBeUndefined();
+        });
+
+        it('should populate failureReasons per resource type and identifier', async () => {
+            const uri = 'test://test-multi-failure-reasons.template';
+            const scenario = TestScenarios[0];
+
+            createAndRegisterDocument(uri, scenario.initialContent, scenario.documentType);
+
+            const mockResource = createMockResourceState('AWS::S3::Bucket');
+            mockResourceStateManager.getResource
+                .mockResolvedValueOnce({ resource: mockResource })
+                .mockResolvedValueOnce({ error: 'Not found' })
+                .mockResolvedValueOnce({ error: 'Timeout' });
+
+            const params: ResourceStateParams = {
+                resourceSelections: [
+                    {
+                        resourceType: 'AWS::S3::Bucket',
+                        resourceIdentifiers: [mockResource.identifier, 'bad-bucket', 'timeout-bucket'],
+                    },
+                ],
+                textDocument: { uri },
+                purpose: ResourceStatePurpose.IMPORT,
+            };
+
+            const result = await importer.importResourceState(params);
+
+            expect(result.successfulImports['AWS::S3::Bucket']).toContain(mockResource.identifier);
+            expect(result.failureReasons).toBeDefined();
+            expect(result.failureReasons!['AWS::S3::Bucket']['bad-bucket']).toBe('Not found');
+            expect(result.failureReasons!['AWS::S3::Bucket']['timeout-bucket']).toBe('Timeout');
         });
 
         it('should include warning when importing managed resources', async () => {
@@ -230,7 +306,7 @@ describe('ResourceStateImporter', () => {
             });
 
             const mockResource = createMockResourceState('AWS::S3::Bucket');
-            mockResourceStateManager.getResource.mockResolvedValue(mockResource);
+            mockResourceStateManager.getResource.mockResolvedValue({ resource: mockResource });
 
             const params: ResourceStateParams = {
                 resourceSelections: [
@@ -264,7 +340,7 @@ describe('ResourceStateImporter', () => {
             });
 
             const mockResource = createMockResourceState('AWS::S3::Bucket');
-            mockResourceStateManager.getResource.mockResolvedValue(mockResource);
+            mockResourceStateManager.getResource.mockResolvedValue({ resource: mockResource });
 
             const params: ResourceStateParams = {
                 resourceSelections: [
@@ -294,7 +370,7 @@ describe('ResourceStateImporter', () => {
             });
 
             const mockResource = createMockResourceState('AWS::S3::Bucket');
-            mockResourceStateManager.getResource.mockResolvedValue(mockResource);
+            mockResourceStateManager.getResource.mockResolvedValue({ resource: mockResource });
 
             const params: ResourceStateParams = {
                 resourceSelections: [
@@ -344,7 +420,7 @@ describe('ResourceStateImporter', () => {
                 },
             ];
 
-            mockResourceStateManager.getResource.mockResolvedValue(mockResource);
+            mockResourceStateManager.getResource.mockResolvedValue({ resource: mockResource });
 
             const params: ResourceStateParams = {
                 resourceSelections,
@@ -383,7 +459,10 @@ describe('ResourceStateImporter', () => {
                 },
             ];
 
-            mockResourceStateManager.getResource.mockResolvedValue(mockResource1);
+            mockResourceStateManager.getResource
+                .mockResolvedValueOnce({ resource: mockResource1 })
+                .mockResolvedValueOnce({ resource: mockResource2 })
+                .mockResolvedValueOnce({ resource: mockResource3 });
 
             const params: ResourceStateParams = {
                 resourceSelections,

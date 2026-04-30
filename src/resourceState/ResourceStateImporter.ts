@@ -16,6 +16,7 @@ import { CfnLspProviders } from '../server/CfnLspProviders';
 import { LoggerFactory } from '../telemetry/LoggerFactory';
 import { ScopedTelemetry } from '../telemetry/ScopedTelemetry';
 import { Telemetry, Measure } from '../telemetry/TelemetryDecorator';
+import { extractErrorMessage } from '../utils/Errors';
 import { getIndentationString } from '../utils/IndentationUtils';
 import { ResourceStateManager } from './ResourceStateManager';
 import {
@@ -156,6 +157,7 @@ export class ResourceStateImporter {
         parentResourceType?: string,
     ): Promise<{ fetchedResourceStates: ResourceTemplateFormat[]; importResult: ResourceStateResult }> {
         const fetchedResourceStates: ResourceTemplateFormat[] = [];
+        const failureReasons: Record<string, Record<string, string>> = {};
         const importResult: ResourceStateResult = {
             completionItem: undefined,
             failedImports: {},
@@ -175,39 +177,49 @@ export class ResourceStateImporter {
             }
             for (const resourceIdentifier of resourceSelection.resourceIdentifiers) {
                 try {
-                    const resourceState = await this.resourceStateManager.getResource(resourceType, resourceIdentifier);
-                    if (resourceState) {
-                        this.getOrCreate(importResult.successfulImports, resourceType, []).push(resourceIdentifier);
-                        const logicalId = this.generateUniqueLogicalId(
-                            resourceType,
-                            resourceIdentifier,
-                            syntaxTree,
-                            generatedLogicalIds,
-                            parentResourceType,
-                        );
-                        generatedLogicalIds.add(logicalId);
-                        fetchedResourceStates.push({
-                            [logicalId]: {
-                                Type: resourceType,
-                                DeletionPolicy:
-                                    purpose === ResourceStatePurpose.IMPORT ? DeletionPolicyOnImport : undefined,
-                                Properties: this.applyTransformations(
-                                    resourceState.properties,
-                                    schema,
-                                    purpose,
-                                    logicalId,
-                                ),
-                                Metadata: await this.createMetadata(resourceIdentifier, purpose),
-                            },
-                        });
-                    } else {
+                    const result = await this.resourceStateManager.getResource(resourceType, resourceIdentifier);
+                    if (!result.resource) {
                         this.getOrCreate(importResult.failedImports, resourceType, []).push(resourceIdentifier);
+                        if (result.error) {
+                            failureReasons[resourceType] ??= {};
+                            failureReasons[resourceType][resourceIdentifier] = result.error;
+                        }
+                        continue;
                     }
+                    this.getOrCreate(importResult.successfulImports, resourceType, []).push(resourceIdentifier);
+                    const logicalId = this.generateUniqueLogicalId(
+                        resourceType,
+                        resourceIdentifier,
+                        syntaxTree,
+                        generatedLogicalIds,
+                        parentResourceType,
+                    );
+                    generatedLogicalIds.add(logicalId);
+                    fetchedResourceStates.push({
+                        [logicalId]: {
+                            Type: resourceType,
+                            DeletionPolicy:
+                                purpose === ResourceStatePurpose.IMPORT ? DeletionPolicyOnImport : undefined,
+                            Properties: this.applyTransformations(
+                                result.resource.properties,
+                                schema,
+                                purpose,
+                                logicalId,
+                            ),
+                            Metadata: await this.createMetadata(resourceIdentifier, purpose),
+                        },
+                    });
                 } catch (error) {
                     log.error(error, `Error importing resource state for ${resourceType} id: ${resourceIdentifier}`);
                     this.getOrCreate(importResult.failedImports, resourceType, []).push(resourceIdentifier);
+                    const errorMessage = extractErrorMessage(error);
+                    failureReasons[resourceType] ??= {};
+                    failureReasons[resourceType][resourceIdentifier] = errorMessage;
                 }
             }
+        }
+        if (Object.keys(failureReasons).length > 0) {
+            importResult.failureReasons = failureReasons;
         }
         return { fetchedResourceStates, importResult };
     }

@@ -53,12 +53,18 @@ export class ResourceStateCompletionProvider implements CompletionProvider {
         }
 
         log.info(`Retrieving resource details from AWS account with id: ${identifier} and type: ${resource.Type}`);
-        const resourceState = await this.resourceStateManager.getResource(resource.Type, identifier);
-        const properties = resourceState?.properties;
-        if (!properties) {
+        let properties: string;
+        try {
+            const result = await this.resourceStateManager.getResource(resource.Type, identifier);
+            if (!result.resource) {
+                return [];
+            }
+            properties = result.resource.properties;
+        } catch {
             log.info(`No resource found for id: ${identifier} and type: ${resource.Type}`);
             return [];
         }
+
         const propertiesObj = JSON.parse(properties) as Record<string, string>;
         this.applyTransformers(propertiesObj, schema);
         this.removeExistingProperties(propertiesObj, resource);

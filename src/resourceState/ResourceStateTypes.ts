@@ -38,6 +38,7 @@ export interface ResourceStateResult {
     completionItem?: CompletionItem;
     successfulImports: Record<ResourceType, ResourceIdentifier[]>;
     failedImports: Record<ResourceType, ResourceIdentifier[]>;
+    failureReasons?: Record<ResourceType, Record<ResourceIdentifier, string>>;
     warning?: string;
 }
 
@@ -88,6 +89,7 @@ export type SearchResourceParams = {
 export type SearchResourceResult = {
     found: boolean;
     resource?: ResourceSummary;
+    error?: string;
 };
 
 export const SearchResourceRequest = new RequestType<SearchResourceParams, SearchResourceResult, void>(
