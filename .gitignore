@@ -9,7 +9,7 @@
 *.node
 .DS_Store
 tools/*
-!tools/*.ts
+!tools/**/*.ts
 **/.aws-cfn-storage
 /oss-attribution
 /tmp-tst

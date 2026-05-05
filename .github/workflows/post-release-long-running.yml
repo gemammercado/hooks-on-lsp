@@ -1,0 +1,96 @@
+name: Post-Release Long Running Tests
+run-name: Long Running Tests for ${{ github.event.release.tag_name }}
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: read
+
+jobs:
+  check-release:
+    runs-on: ubuntu-latest
+    outputs:
+      should-run: ${{ steps.check.outputs.should-run }}
+      duration: ${{ steps.check.outputs.duration }}
+      timeout: ${{ steps.check.outputs.timeout }}
+    steps:
+      - name: Check release type
+        id: check
+        run: |
+          TAG="${{ github.event.release.tag_name }}"
+          if [[ "$TAG" =~ -beta$ ]]; then
+            echo "should-run=true" >> $GITHUB_OUTPUT
+            echo "duration=4h" >> $GITHUB_OUTPUT
+            echo "timeout=360" >> $GITHUB_OUTPUT
+          elif [[ "$TAG" =~ -alpha$ ]]; then
+            echo "should-run=true" >> $GITHUB_OUTPUT
+            echo "duration=20m" >> $GITHUB_OUTPUT
+            echo "timeout=60" >> $GITHUB_OUTPUT
+          else
+            echo "should-run=false" >> $GITHUB_OUTPUT
+          fi
+
+  long-running-tests:
+    needs: check-release
+    if: needs.check-release.outputs.should-run == 'true'
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        node-version: [18, 20, 22]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: ${{ fromJSON(needs.check-release.outputs.timeout) }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ github.event.release.tag_name }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node-version }}
+
+      - name: Download release standalone
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG="${{ github.event.release.tag_name }}"
+          case "${{ matrix.os }}" in
+            ubuntu-latest) PLATFORM="linux" ;;
+            windows-latest) PLATFORM="win32" ;;
+            macos-latest) PLATFORM="darwin" ;;
+          esac
+          PATTERN="*${PLATFORM}*x64*node${{ matrix.node-version }}*.zip"
+          gh release download "$TAG" --pattern "$PATTERN"
+
+      - name: Extract standalone bundle
+        shell: bash
+        run: |
+          unzip *.zip
+          if [[ "${{ matrix.os }}" != "windows-latest" ]]; then
+            chmod +x cfn-lsp-server-standalone.js
+          fi
+
+      - name: Test standalone bundle
+        run: node cfn-lsp-server-standalone.js --version
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run long-running stability tests
+        env:
+          STABILITY_TEST_DURATION: ${{ needs.check-release.outputs.duration }}
+          STANDALONE_PATH: ./cfn-lsp-server-standalone.js
+        run: npm run test:stability
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: long-running-test-results-${{ matrix.os }}-node${{ matrix.node-version }}
+          path: |
+            test-results.json
+            test-logs.txt
+          if-no-files-found: ignore
